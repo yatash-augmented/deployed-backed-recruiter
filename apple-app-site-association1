@@ -1,0 +1,11 @@
+{
+    "applinks": {
+      "apps": [],
+      "details": [
+        {
+          "appID": "98LNLVWQ44.com.smarttalentjob",  // Replace TEAMID with your Apple Developer Team ID
+          "paths": [ "/usersIos/*" ]
+        }
+      ]
+    }
+  }

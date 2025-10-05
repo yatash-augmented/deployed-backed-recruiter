@@ -1,0 +1,39 @@
+services:
+  smarttalent-app:
+    build: .
+    container_name: smarttalent-app
+    ports:
+      - "3000:8080"
+    environment:
+      # Application Configuration
+      - NODE_ENV=development
+      - PORT=8080
+      
+      # Database Configuration
+      - DB_HOST=server.augmentedresourcing.com
+      - DB_USER=smarttal_devlopment
+      - DB_PASSWORD=P0f2VsaH4JEH
+      - DB_NAME=smarttal_augmentedresourc_smart
+      
+      # API Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      
+      # Firebase Configuration
+      - FIREBASE_PROJECT_ID=smart-talent-66df6
+      - FIREBASE_CLIENT_EMAIL=firebase-adminsdk-fbsvc@smart-talent-66df6.iam.gserviceaccount.com
+      
+      # Google OAuth
+      - GOOGLE_CLIENT_ID=162801726700-iiu2m1j8gpbm3l9uhcnrdddqt4i8rrsp.apps.googleusercontent.com
+    volumes:
+      # Persist uploaded files
+      - ./public/uploads:/app/public/uploads
+      - ./public/compressed:/app/public/compressed
+      # Mount Firebase service account key
+      - ./serviceAccountKey.json:/app/serviceAccountKey.json:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s

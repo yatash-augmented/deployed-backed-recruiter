@@ -1,0 +1,170 @@
+name: Deploy SmartTalent Backend to ECS
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: eu-west-3
+  ECR_REPOSITORY: smarttalent-backend
+  ECS_CLUSTER: smart-talent
+  ECS_SERVICE: smart-talent-service-rimfw7e0
+  ECS_TASK_DEFINITION: smart-talent
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+    
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+          VCS_REF=${{ github.sha }}
+    
+    - name: Download current task definition
+      run: |
+        aws ecs describe-task-definition \
+          --task-definition ${{ env.ECS_TASK_DEFINITION }} \
+          --query taskDefinition > task-definition.json
+    
+    - name: Update task definition with new image
+      run: |
+        # Get the latest image URI
+        NEW_IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest"
+        
+        # Update the task definition with new image
+        jq --arg IMAGE "$NEW_IMAGE_URI" '.containerDefinitions[0].image = $IMAGE' task-definition.json > updated-task-definition.json
+        
+        # Remove fields that shouldn't be in the new task definition
+        jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' updated-task-definition.json > final-task-definition.json
+        
+        echo "Updated task definition with image: $NEW_IMAGE_URI"
+    
+    - name: Register new task definition revision
+      run: |
+        aws ecs register-task-definition \
+          --cli-input-json file://final-task-definition.json \
+          --region ${{ env.AWS_REGION }}
+        
+        # Get the new revision number
+        NEW_REVISION=$(aws ecs describe-task-definition \
+          --task-definition ${{ env.ECS_TASK_DEFINITION }} \
+          --query 'taskDefinition.revision' \
+          --output text)
+        
+        echo "NEW_REVISION=$NEW_REVISION" >> $GITHUB_ENV
+        echo "New task definition revision: $NEW_REVISION"
+    
+    - name: Update ECS service
+      run: |
+        aws ecs update-service \
+          --cluster ${{ env.ECS_CLUSTER }} \
+          --service ${{ env.ECS_SERVICE }} \
+          --task-definition ${{ env.ECS_TASK_DEFINITION }}:${{ env.NEW_REVISION }} \
+          --region ${{ env.AWS_REGION }}
+        
+        echo "ECS service updated with task definition revision: ${{ env.NEW_REVISION }}"
+    
+    - name: Wait for deployment to complete
+      run: |
+        echo "Waiting for ECS service to stabilize..."
+        aws ecs wait services-stable \
+          --cluster ${{ env.ECS_CLUSTER }} \
+          --services ${{ env.ECS_SERVICE }} \
+          --region ${{ env.AWS_REGION }}
+        
+        echo "Deployment completed successfully!"
+    
+    - name: Get deployment status
+      run: |
+        # Get service information
+        SERVICE_INFO=$(aws ecs describe-services \
+          --cluster ${{ env.ECS_CLUSTER }} \
+          --services ${{ env.ECS_SERVICE }} \
+          --region ${{ env.AWS_REGION }} \
+          --query 'services[0].{status:status,runningCount:runningCount,desiredCount:desiredCount,taskDefinition:taskDefinition}')
+        
+        echo "=== Service Status ==="
+        echo "$SERVICE_INFO"
+        
+        # Get task definition details
+        TASK_DEF_INFO=$(aws ecs describe-task-definition \
+          --task-definition ${{ env.ECS_TASK_DEFINITION }}:${{ env.NEW_REVISION }} \
+          --region ${{ env.AWS_REGION }} \
+          --query 'taskDefinition.{revision:revision,image:containerDefinitions[0].image}')
+        
+        echo "=== Task Definition ==="
+        echo "$TASK_DEF_INFO"
+        
+        # Get ALB URL if available
+        ALB_DNS=$(aws elbv2 describe-load-balancers \
+          --region ${{ env.AWS_REGION }} \
+          --query 'LoadBalancers[?contains(LoadBalancerName, `smart`) || contains(LoadBalancerName, `talent`)].DNSName' \
+          --output text 2>/dev/null || echo "No ALB found")
+        
+        if [ "$ALB_DNS" != "No ALB found" ] && [ ! -z "$ALB_DNS" ]; then
+          echo " Application URL: http://$ALB_DNS"
+        else
+          echo "  Application deployed. Check ECS console for service URL."
+        fi
+    
+    - name: Cleanup old task definitions
+      if: success()
+      run: |
+        echo "Cleaning up old task definition revisions (keeping last 5)..."
+        
+        # Get all task definition revisions
+        REVISIONS=$(aws ecs list-task-definitions \
+          --family-prefix ${{ env.ECS_TASK_DEFINITION }} \
+          --sort DESC \
+          --max-items 20 \
+          --query 'taskDefinitionArns[*]' \
+          --output text)
+        
+        # Skip the first 5 (most recent) and deregister the rest
+        echo "$REVISIONS" | tr ' ' '\n' | tail -n +6 | while read revision; do
+          if [ ! -z "$revision" ]; then
+            echo "Deregistering old revision: $revision"
+            aws ecs deregister-task-definition \
+              --task-definition "$revision" \
+              --region ${{ env.AWS_REGION }} || true
+          fi
+        done
