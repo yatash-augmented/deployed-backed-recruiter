@@ -73,8 +73,11 @@ jobs:
         # Update the task definition with new image while preserving all environment variables
         jq --arg IMAGE "$NEW_IMAGE_URI" '.containerDefinitions[0].image = $IMAGE' task-definition.json > updated-task-definition.json
         
+        # Add OPENAI_API_KEY environment variable if api_key exists (for compatibility)
+        jq '.containerDefinitions[0].environment += [{"name": "OPENAI_API_KEY", "value": (.containerDefinitions[0].environment[] | select(.name == "api_key") | .value)}]' updated-task-definition.json > temp-task-definition.json
+        
         # Remove fields that shouldn't be in the new task definition but keep all environment variables
-        jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' updated-task-definition.json > final-task-definition.json
+        jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' temp-task-definition.json > final-task-definition.json
         
         echo "Updated task definition with image: $NEW_IMAGE_URI"
         echo "Preserved environment variables: $(jq '.containerDefinitions[0].environment | length' final-task-definition.json)"
