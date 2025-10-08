@@ -2,10 +2,10 @@ const mysql = require('mysql2/promise');
 const { Sequelize, DataTypes, Model, STRING } = require('sequelize');
 const config  = {
   db: {
-    host     : 'server.augmentedresourcing.com',
-    user     : 'smarttal_devlopment',
-    password : 'P0f2VsaH4JEH',
-    database : 'smarttal_augmentedresourc_smart',
+    host     : process.env.DB_HOST,
+    user     : process.env.DB_USER,
+    password : process.env.DB_PASSWORD,
+    database : process.env.DB_NAME,
 }};
 
 // connection.connect(function(err) {
@@ -37,10 +37,14 @@ async function query(sql, params , callBack) {
   
 }
 
-const sequelize = new Sequelize('smarttal_augmentedresourc_smart', 'smarttal_devlopment', 'P0f2VsaH4JEH', {
-  host: 'server.augmentedresourcing.com',
-  dialect: 'mysql',
-  port: 3306,
+const sequelize = new Sequelize(
+  process.env.DB_NAME, 
+  process.env.DB_USER, 
+  process.env.DB_PASSWORD, 
+  {
+    host: process.env.DB_HOST,
+    dialect: 'mysql',
+    port: process.env.DB_PORT || 3306,
   pool: {
     max: 20, // Increase if too low (default is 5)
     min: 0,
