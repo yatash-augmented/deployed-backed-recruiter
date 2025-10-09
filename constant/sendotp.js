@@ -10,19 +10,18 @@ const verifyEmail = (email, res,otp) => {
     //     }
     // });
 
-    var transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: '587',
-        auth: {
-            user: "resourcingaugmented@gmail.com",
-            pass: "dovb byjw wosh bxuc"
-        },
-        secureConnection: 'false',
-        tls: {
-            ciphers: 'SSLv3'
-        }
-    
-    });
+     const transporter = nodemailer.createTransport({
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // true for 465, false for 587
+  auth: {
+    user: 'resourcingaugmented@gmail.com',
+    pass: 'dovb byjw wosh bxuc', // your Gmail app password
+  },
+  tls: {
+    rejectUnauthorized: false
+  }
+});
         
 
     // Configure the mailoptions object
