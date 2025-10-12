@@ -438,6 +438,32 @@ const compressVideo = async (inputPath, outputPath) => {
 
 // });
 
+// router.post('/savevideo', upload.single('profileimage'), (req, res, next) => {
+//     req.setTimeout(600000); // 10 min
+//     res.setTimeout(600000);
+//     next();
+//   }, (req, res) => {
+//     const outputPath = __basedir+`/public/uploads${req.file.path.split('compressed')[1]}`;
+//     exec(`ffmpeg -i ${req.file.path} -preset fast -vcodec libx264 -crf 35 -b:v 350k -maxrate 350k -bufsize 700k -vf scale=640:-1 -c:a aac -b:a 48k ${outputPath}`, (error, stdout, stderr) => {
+//         if (error) {
+//           console.error(`FFmpeg error: ${error.message}`);
+//           //return res.status(500).json({ error: "Video compression failed" });
+//         }
+//         fs.unlinkSync(req.file.path)
+       
+//         //res.json({ message: "Video compressed successfully", output: outputPath });
+//       });
+
+//  const sql3 = `UPDATE candidatedata SET video = '${outputPath.split('uploads')[1]}',stage = 'updated' WHERE email = ?`;
+//         console.log("sql3",sql3)
+//         con.query(sql3, [req.body.email], function (err, result) {
+//             if (err) {
+//                 res.status(400).json({ success: false, message: 'An unexpected error occurred. Please try again later.' });
+//             } else {
+//                 res.status(200).json({ success: true, message: 'Video Save Successfully.', stage: 'complete' });
+//             }
+//         })
+//   });
 // Add this import at the top of the file
 const { uploadToS3, generateS3Key } = require('../utils/s3Helper');
 
@@ -498,7 +524,6 @@ router.post('/savevideo', upload.single('profileimage'), (req, res, next) => {
         res.status(500).json({ success: false, message: 'Video processing failed' });
     }
   });
-
 
 /* POST candidate Dashboard. */
 router.post('/dashboard', function (req, res, next) {
