@@ -511,33 +511,93 @@ router.post('/SkipvideoRecording', async(req, res, next) => {
 })
 
   /* POST candidate Dashboard. */
-router.post('/savevideo', upload.single('profileimage'), async(req, res, next) => {
-    const outputPath = __basedir+`/public/uploads${req.file.path.split('compressed')[1]}`;
-   //await compressVideo(req.file.path, outputPath)
-   exec(`ffmpeg -i ${req.file.path} -preset fast -vcodec libx264 -crf 35 -b:v 350k -maxrate 350k -bufsize 700k -vf scale=640:-1 -c:a aac -b:a 48k ${outputPath}`, (error, stdout, stderr) => {
-    if (error) {
-      console.error(`FFmpeg error: ${error.message}`);
-      //return res.status(500).json({ error: "Video compression failed" });
-    }
-    fs.unlinkSync(req.file.path)
+// router.post('/savevideo', upload.single('profileimage'), async(req, res, next) => {
+//     const outputPath = __basedir+`/public/uploads${req.file.path.split('compressed')[1]}`;
+//    //await compressVideo(req.file.path, outputPath)
+//    exec(`ffmpeg -i ${req.file.path} -preset fast -vcodec libx264 -crf 35 -b:v 350k -maxrate 350k -bufsize 700k -vf scale=640:-1 -c:a aac -b:a 48k ${outputPath}`, (error, stdout, stderr) => {
+//     if (error) {
+//       console.error(`FFmpeg error: ${error.message}`);
+//       //return res.status(500).json({ error: "Video compression failed" });
+//     }
+//     fs.unlinkSync(req.file.path)
    
-    //res.json({ message: "Video compressed successfully", output: outputPath });
-  });
-      if(req.body.jobMasterId){
-   await JobMaster.update({jobVideoURl: outputPath.split('uploads')[1]},{where: {id: req.body.jobMasterId}})
-   }
-   else{
-    await JobMaster.update({jobVideoURl: outputPath.split('uploads')[1]},{where: {companyEmail: req.body.email}})
-   }
+//     //res.json({ message: "Video compressed successfully", output: outputPath });
+//   });
+//       if(req.body.jobMasterId){
+//    await JobMaster.update({jobVideoURl: outputPath.split('uploads')[1]},{where: {id: req.body.jobMasterId}})
+//    }
+//    else{
+//     await JobMaster.update({jobVideoURl: outputPath.split('uploads')[1]},{where: {companyEmail: req.body.email}})
+//    }
   
-const sql3 = `UPDATE recuiterdata SET stage = 'updated' WHERE email = ?`;
-    con.query(sql3, [req.body.email], function (err, result) {
-        if (err) {
-            res.status(400).json({ success: false, message: err });
-        } else {
-            res.status(200).json({ success: true, message: 'Video Save Successfully.', stage: 'updated' });
+// const sql3 = `UPDATE recuiterdata SET stage = 'updated' WHERE email = ?`;
+//     con.query(sql3, [req.body.email], function (err, result) {
+//         if (err) {
+//             res.status(400).json({ success: false, message: err });
+//         } else {
+//             res.status(200).json({ success: true, message: 'Video Save Successfully.', stage: 'updated' });
+//         }
+//     })
+// });
+// Add this import at the top of the file
+const { uploadToS3, generateS3Key } = require('../utils/s3Helper');
+
+router.post('/savevideo', upload.single('profileimage'), async(req, res, next) => {
+    try {
+        // Validate file and path
+        if (!req.file || !req.file.path || !req.file.path.includes('compressed')) {
+            return res.status(400).json({ success: false, message: 'Invalid file upload' });
         }
-    })
+        
+        const outputPath = __basedir + `/public/uploads${req.file.path.split('compressed')[1]}`;
+        console.log(`Processing video: ${req.file.path} -> ${outputPath}`);
+        
+        // Compress video
+        await new Promise((resolve, reject) => {
+            exec(`ffmpeg -y -i "${req.file.path}" -preset fast -vcodec libx264 -crf 35 -b:v 350k -maxrate 350k -bufsize 700k -vf scale=640:-1 -c:a aac -b:a 48k "${outputPath}"`, (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`FFmpeg error: ${error.message}`);
+                    console.error(`FFmpeg stderr: ${stderr}`);
+                    return reject(error);
+                }
+                console.log(`Compression finished: ${outputPath}`);
+                resolve();
+            });
+        });
+        
+        // Upload to S3
+        const s3Key = generateS3Key(req.file.originalname, req.body.email);
+        const s3Url = await uploadToS3(outputPath, s3Key);
+        
+        // Clean up local files
+        fs.unlinkSync(req.file.path); // Delete temp file
+        fs.unlinkSync(outputPath); // Delete compressed file
+        
+        // Update JobMaster with S3 URL
+        if(req.body.jobMasterId){
+            await JobMaster.update({jobVideoURl: s3Url},{where: {id: req.body.jobMasterId}});
+        } else {
+            await JobMaster.update({jobVideoURl: s3Url},{where: {companyEmail: req.body.email}});
+        }
+        
+        const sql3 = `UPDATE recuiterdata SET stage = 'updated' WHERE email = ?`;
+        con.query(sql3, [req.body.email], function (err, result) {
+            if (err) {
+                res.status(400).json({ success: false, message: err });
+            } else {
+                res.status(200).json({ 
+                    success: true, 
+                    message: 'Video Save Successfully.', 
+                    stage: 'updated',
+                    videoUrl: s3Url 
+                });
+            }
+        });
+        
+    } catch (error) {
+        console.error('Video processing error:', error);
+        res.status(500).json({ success: false, message: 'Video processing failed' });
+    }
 });
 
 
