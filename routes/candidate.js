@@ -438,31 +438,65 @@ const compressVideo = async (inputPath, outputPath) => {
 
 // });
 
+// Add this import at the top of the file
+const { uploadToS3, generateS3Key } = require('../utils/s3Helper');
+
 router.post('/savevideo', upload.single('profileimage'), (req, res, next) => {
     req.setTimeout(600000); // 10 min
     res.setTimeout(600000);
     next();
-  }, (req, res) => {
-    const outputPath = __basedir+`/public/uploads${req.file.path.split('compressed')[1]}`;
-    exec(`ffmpeg -i ${req.file.path} -preset fast -vcodec libx264 -crf 35 -b:v 350k -maxrate 350k -bufsize 700k -vf scale=640:-1 -c:a aac -b:a 48k ${outputPath}`, (error, stdout, stderr) => {
-        if (error) {
-          console.error(`FFmpeg error: ${error.message}`);
-          //return res.status(500).json({ error: "Video compression failed" });
+  }, async (req, res) => {
+    try {
+        // Validate file and path
+        if (!req.file || !req.file.path || !req.file.path.includes('compressed')) {
+            return res.status(400).json({ success: false, message: 'Invalid file upload' });
         }
-        fs.unlinkSync(req.file.path)
-       
-        //res.json({ message: "Video compressed successfully", output: outputPath });
-      });
-
- const sql3 = `UPDATE candidatedata SET video = '${outputPath.split('uploads')[1]}',stage = 'updated' WHERE email = ?`;
-        console.log("sql3",sql3)
+        
+        const outputPath = __basedir + `/public/uploads${req.file.path.split('compressed')[1]}`;
+        console.log(`Processing video: ${req.file.path} -> ${outputPath}`);
+        
+        // Compress video
+        await new Promise((resolve, reject) => {
+            exec(`ffmpeg -y -i "${req.file.path}" -preset fast -vcodec libx264 -crf 35 -b:v 350k -maxrate 350k -bufsize 700k -vf scale=640:-1 -c:a aac -b:a 48k "${outputPath}"`, (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`FFmpeg error: ${error.message}`);
+                    console.error(`FFmpeg stderr: ${stderr}`);
+                    return reject(error);
+                }
+                console.log(`Compression finished: ${outputPath}`);
+                resolve();
+            });
+        });
+        
+        // Upload to S3
+        const s3Key = generateS3Key(req.file.originalname, req.body.email);
+        const s3Url = await uploadToS3(outputPath, s3Key);
+        
+        // Clean up local files
+        fs.unlinkSync(req.file.path); // Delete temp file
+        fs.unlinkSync(outputPath); // Delete compressed file
+        
+        // Update database with S3 URL
+        const sql3 = `UPDATE candidatedata SET video = '${s3Url}',stage = 'updated' WHERE email = ?`;
+        console.log("sql3", sql3);
+        
         con.query(sql3, [req.body.email], function (err, result) {
             if (err) {
-                res.status(400).json({ success: false, message: 'An unexpected error occurred. Please try again later.' });
+                res.status(400).json({ success: false, message: 'Database update failed' });
             } else {
-                res.status(200).json({ success: true, message: 'Video Save Successfully.', stage: 'complete' });
+                res.status(200).json({ 
+                    success: true, 
+                    message: 'Video Save Successfully.', 
+                    stage: 'complete',
+                    videoUrl: s3Url 
+                });
             }
-        })
+        });
+        
+    } catch (error) {
+        console.error('Video processing error:', error);
+        res.status(500).json({ success: false, message: 'Video processing failed' });
+    }
   });
 
 
