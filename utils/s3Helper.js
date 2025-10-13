@@ -19,8 +19,8 @@ const uploadToS3 = async (filePath, key) => {
       Bucket: BUCKET_NAME,
       Key: key,
       Body: fileContent,
-      ContentType: 'video/mp4',
-      ACL: 'public-read' // Make file publicly accessible
+      ContentType: 'video/mp4'
+      // Removed ACL as bucket doesn't allow ACLs
     };
     
     const result = await s3.upload(params).promise();
