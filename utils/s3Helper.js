@@ -4,9 +4,8 @@ const path = require('path');
 
 // Configure S3
 const s3 = new AWS.S3({
-  region: process.env.AWS_REGION || 'eu-west-3',
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  region: process.env.AWS_REGION || 'eu-west-3'
+  // Remove explicit credentials to use IAM role
 });
 
 const BUCKET_NAME = 'smarttalent-videos-eu-west-3';
